@@ -1,0 +1,18 @@
+# ESP-IDF build output
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+**/__pycache__/
+*.pyc
+
+# captures / analysis artifacts (regenerated)
+renders/
+audit/
+*.wav
+*.bin
+*.elf
+*.map
+
+# logs
+*.log

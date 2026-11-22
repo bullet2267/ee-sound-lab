@@ -1,0 +1,34 @@
+# ee-sound-lab
+
+> Open ESP32-P4 firmware that synthesizes a naturalistic car active-exhaust
+> engine sound via granular playback driven by CAN RPM. Independent,
+> interoperability-focused re-implementation of a commercial unit's audio
+> model. Not affiliated with any vendor; no vendor branding used.
+
+Goal for contributors: make the synthesized sound natural (match real
+recordings). Hard-clipping defect is fixed+verified (0 clipped samples).
+Open issue: ~28% amplitude tremolo (4-45 Hz) on the load layer.
+
+## Read first
+- [AGENTS.md](AGENTS.md): full context, current metrics, where to look, review asks
+- [README.md](README.md): overview and quick start
+
+## Core code
+- [firmware/main/engine.c](firmware/main/engine.c): the audio engine (START HERE)
+- [firmware/main/bank.c](firmware/main/bank.c): sound-pack loader (SMP2+RLS2)
+- [firmware/main/stand.c](firmware/main/stand.c): bench model (ignition/throttle/gear)
+- [firmware/main/i2s_out.c](firmware/main/i2s_out.c): I2S output + amp gate
+- [firmware/main/net_ws.c](firmware/main/net_ws.c): LAN control (/diag /drag /dump.wav /ctrl)
+
+## Tooling
+- [tools/audio_audit.py](tools/audio_audit.py): defect metrics + spectrogram PNG
+- [tools/board_cap.py](tools/board_cap.py): capture a scripted drag from the board
+
+## Docs
+- [docs/SOUND_FORMATS.md](docs/SOUND_FORMATS.md): SMP2/RLS2/RLM2 pack formats
+- [docs/DEV_LOG.md](docs/DEV_LOG.md): engine evolution notes
+- [docs/OVERVIEW.md](docs/OVERVIEW.md): architecture overview
+
+## Not included
+- BLE pairing/crypto layer (device key-derivation) — withheld on purpose; not
+  needed for the sound problem.

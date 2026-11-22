@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp_hosted: "*"
+  espressif/esp_codec_dev: "*"
+
+[executed on device: KOMPUTER (0089e01f-ace6-4dff-b186-c09b6a80372f)]
