@@ -13,24 +13,6 @@ static inline int16_t clip16(int32_t v) {
     return (int16_t)v;
 }
 
-/* ПРАВКА 2026-11-22: выходной уровень был откалиброван, когда газ до движка не
- * доходил (thr=0 весь прогон, член закона 0.5). Сейчас газ работает (thr до
- * 0.95) -> закон вырос ~вдвое, плюс (rpm/800)^1.2 до ~11x на отсечке: замер с
- * платы показал top-RMS ~24.5k и ЖЁСТКИЙ КЛИП 13% сэмплов (пик 32768). На
- * спектрограмме это широкополосный хэш, заливающий гармоники = «хрип/игрушечн.».
- * Демо оригинала S63: top-RMS ~10.3k. OUT_TRIM = 10.3/24.5 ~= 0.42 возвращает
- * к цели. Мягкий лимитер (колено 26к) ловит редкие транзиенты (прострелы), не
- * трогая тело сигнала: прежний tanh «пачкал» именно потому, что сигнал лупил в
- * него постоянно — после трима он сидит ~10k и до колена не доходит. */
-#define OUT_TRIM 0.42f
-static inline int16_t softlim(float v) {
-    const float LIN = 26000.f, MAXV = 32767.f, R = MAXV - LIN;  /* R=6767 */
-    float a = v < 0 ? -v : v;
-    if (a <= LIN) return (int16_t)v;
-    float comp = LIN + R * tanhf((a - LIN) / R);   /* асимптота -> 32767 */
-    return (int16_t)(v < 0 ? -comp : comp);
-}
-
 // Быстрый PRNG (xorshift32) — без libc rand, безопасно в аудио-потоке.
 static inline uint32_t xrand(uint32_t *s) {
     uint32_t x = *s ? *s : 0x1234567u;
@@ -231,7 +213,11 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
         e->layerMix = 1.f;
         e->bfLeft = 0; e->bfTimer = 0;
         e->hasOff = (b && rsb_count_layer(b, 1) > 0);
-        e->multiMode = rsb_has_windows(b);          // THOR-окна -> аддитивный микс
+        /* ПРАВКА 2026-11-22: ВЫКЛ синтез-гранулятор. Играем ОРИГИНАЛ —
+         * честный ladder-crossfade реальных лупов (как revheadz/THOR):
+         * rsb_grain_pair_l -> 2 соседних лупа слоя, питч rpm/baseRpm,
+         * кроссфейд по RPM, бленд on/off по газу. Никакого синтеза. */
+        e->multiMode = 0;
         for (int k = 0; k < 96; k++) { e->grGain[k] = 0.f; e->grJit[k] = 1.f;
                                      /* стартовая фаза случайная — иначе все слоты
                                       * идут синфазно (скрипт: ph=rng.random()) */
@@ -558,7 +544,7 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
             }
         }
 
-        int16_t s = softlim(mix * OUT_TRIM);   /* ПРАВКА 2026-11-22: трим+мягкий лимитер */
+        int16_t s = clip16((int32_t)mix);
         accOut += (float)s * s;
         out[2*n]   = s;    // L
         out[2*n+1] = s;    // R

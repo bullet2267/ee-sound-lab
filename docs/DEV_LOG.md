@@ -45,3 +45,14 @@ low with a natural roll-off and distinct idle harmonics.
   beating — would crank-phase-locked retrigger reduce it while keeping the
   firing texture? See `AGENTS.md` ask #1.
 - Loudness ~30% hot vs reference (one-line `OUT_TRIM`, by-ear).
+
+## 2026-11-22 (2) — dropped synthesis, play the originals
+Reverted the granular-synth direction entirely. The clipping "fix" (OUT_TRIM +
+limiter) was removed because it flattened transients and killed the character
+(backfire attack, throttle-peak overlay, exhaust brightness). More importantly,
+the whole granular-retrigger model was the wrong approach: THOR and RevHeadz
+both just play recorded loops crossfaded by RPM/throttle. Switched the engine to
+the faithful ladder-crossfade path (`multiMode = 0`). Result on the board:
+load-layer tremolo 28% → 0.7%, clipping 13% → 0.14%, and the spectrogram shows
+real harmonics tracking RPM instead of a granular wash. Remaining: idle tremolo
+~30% (class-1 idle loops beating).
