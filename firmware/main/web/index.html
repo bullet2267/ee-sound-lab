@@ -2,348 +2,242 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>RevSound Стенд</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>RevSound</title>
 <style>
   :root{
-    --bg:#f3f4f6; --panel:#ffffff; --fg:#111418; --muted:#5b6472;
-    --line:#d8dce3; --accent:#e5361f; --good:#1f9d55; --warn:#e0a106; --idle:#8a94a6;
+    --bg:#0b0d12; --bg2:#0f141c; --panel:#141a24; --panel2:#1b2230;
+    --fg:#eef2f8; --muted:#8b96a8; --line:#28303d;
+    --accent:#ff3b24; --accent2:#ff7a2f; --good:#2fd27a; --warn:#f2b32e;
+    --shadow:0 10px 30px rgba(0,0,0,.45);
     --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   }
-  @media (prefers-color-scheme:dark){:root{
-    --bg:#0e1116; --panel:#171b22; --fg:#eef1f5; --muted:#9aa4b2;
-    --line:#2a313b; --accent:#ff4a31; --good:#35c173; --warn:#f0bb2e; color-scheme:dark;
-  }}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);
-       padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right))
-               max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
-  .wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
-  header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-  h1{font-size:1.1rem;margin:0;letter-spacing:.02em}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block;margin-right:6px}
-  .dot.on{background:var(--good)} .dot.sim{background:var(--warn)}
-  button{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);
-         border-radius:10px;padding:10px 14px;cursor:pointer}
-  button:hover{border-color:var(--accent)}
-  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
-  input[type=text]{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);
-         border-radius:10px;padding:9px 11px;width:120px}
-  /* ---- бейджи состояния ---- */
-  .badges{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-  @media(max-width:520px){.badges{grid-template-columns:repeat(2,1fr)}}
-  .badge{background:var(--panel);border:2px solid var(--line);border-radius:12px;
-         padding:10px 8px;text-align:center;transition:.15s}
-  .badge .k{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
-  .badge .v{font-weight:700;font-size:1.05rem;margin-top:3px}
-  .badge.on{border-color:var(--good)} .badge.on .v{color:var(--good)}
-  .badge.off .v{color:var(--muted)}
-  .badge.warn{border-color:var(--warn)} .badge.warn .v{color:var(--warn)}
-  /* ---- прибор ---- */
-  .gauge{background:var(--panel);border:1px solid var(--line);border-radius:16px;
-         padding:10px 14px 14px;display:flex;flex-direction:column;gap:4px}
-  .rpmBig{font-family:var(--mono);font-size:3.2rem;font-weight:800;text-align:center;
-          line-height:1;font-variant-numeric:tabular-nums;color:var(--muted)}
-  .rpmBig.run{color:var(--good)} .rpmBig.rev{color:var(--accent)}
-  .rpmSub{text-align:center;font-size:.8rem;color:var(--muted);margin-top:2px}
-  .bar{height:26px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
-       overflow:hidden;position:relative}
-  .bar .fill{height:100%;width:0;background:var(--good);transition:width .08s linear}
-  .bar .lbl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-       font-size:.75rem;font-weight:600;mix-blend-mode:normal}
-  .bar.thr .fill{background:var(--warn)}
-  .bar .redline{position:absolute;top:0;bottom:0;left:82%;right:0;background:rgba(229,54,31,.25)}
-  .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  label.fld{font-size:.8rem;color:var(--muted);min-width:70px}
-  input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
-  /* ---- педаль газа: нажал-держишь, отпустил = 0 ---- */
-  #pedal{flex:1;min-width:160px;height:120px;position:relative;overflow:hidden;
-         border:2px solid var(--line);border-radius:14px;background:var(--bg);
-         touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer}
-  #pedal .pfill{position:absolute;left:0;right:0;bottom:0;height:0;
-         background:linear-gradient(180deg,var(--warn),var(--accent))}
-  #pedal .plbl{position:absolute;inset:0;display:flex;align-items:center;
-         justify-content:center;font-size:.85rem;font-weight:700;pointer-events:none}
-  #pedal.held{border-color:var(--accent)}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-         padding:14px;display:flex;flex-direction:column;gap:12px}
-  .presets{display:flex;gap:8px;flex-wrap:wrap}
-  .presets button.sel,button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
-  #ignBtn.sel{background:var(--good);border-color:var(--good);color:#fff;font-weight:700}
-  .note{font-size:.78rem;color:var(--muted);line-height:1.5}
-  .err{color:var(--accent)}
-  .monoV{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{margin:0;color:var(--fg);font-family:var(--font);
+    background:radial-gradient(1200px 600px at 50% -10%,#18202c 0%,var(--bg) 60%);
+    padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right))
+            max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+  .wrap{max-width:480px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+  header{display:flex;align-items:center;justify-content:space-between}
+  .brand{font-weight:800;letter-spacing:.12em;font-size:1rem}
+  .brand b{color:var(--accent)}
+  .status{display:flex;align-items:center;gap:7px;font-size:.78rem;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 0 transparent}
+  .dot.on{background:var(--good);box-shadow:0 0 10px var(--good)}
+  .dot.sim{background:var(--warn)} .dot.err{background:var(--accent)}
+
+  /* ---- прибор оборотов ---- */
+  .gauge{position:relative;background:linear-gradient(180deg,var(--panel),var(--bg2));
+    border:1px solid var(--line);border-radius:24px;padding:14px;box-shadow:var(--shadow)}
+  .gauge svg{display:block;width:100%;height:auto}
+  .gc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;pointer-events:none}
+  .rpm{font-family:var(--mono);font-weight:800;font-size:3.4rem;line-height:1;
+    font-variant-numeric:tabular-nums;color:var(--fg);text-shadow:0 2px 12px rgba(0,0,0,.5)}
+  .rpm.run{color:var(--good)} .rpm.red{color:var(--accent)}
+  .rpmU{font-size:.72rem;letter-spacing:.22em;color:var(--muted);margin-top:4px}
+  .chips{display:flex;gap:8px;margin-top:12px;justify-content:center}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;font-size:.78rem;color:var(--muted);display:flex;gap:7px;align-items:center}
+  .chip b{color:var(--fg);font-weight:700;font-variant-numeric:tabular-nums}
+  .chip.gear b{color:var(--accent2)}
+
+  /* ---- режимы ---- */
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--panel);
+    border:1px solid var(--line);border-radius:16px;padding:6px}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-weight:700;
+    padding:13px 8px;border-radius:11px;cursor:pointer;transition:.18s;font-size:.92rem}
+  .seg button.on{background:linear-gradient(180deg,var(--accent),#d42a16);color:#fff;
+    box-shadow:0 6px 16px rgba(255,59,36,.35)}
+
+  /* ---- зажигание ---- */
+  .ign{border:1px solid var(--line);border-radius:18px;padding:17px;font:inherit;font-weight:800;
+    font-size:1.05rem;letter-spacing:.04em;cursor:pointer;color:var(--fg);
+    background:linear-gradient(180deg,var(--panel2),var(--panel));transition:.18s;
+    display:flex;align-items:center;justify-content:center;gap:10px}
+  .ign.on{background:linear-gradient(180deg,var(--good),#1ea85e);color:#04110a;
+    box-shadow:0 8px 22px rgba(47,210,122,.3)}
+  .ign .ic{width:20px;height:20px;display:inline-block}
+
+  /* ---- громкость ---- */
+  .vol{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px 16px;
+    display:flex;align-items:center;gap:14px}
+  .vol .ic{width:22px;height:22px;color:var(--muted);flex:none}
+  .vol input{flex:1;-webkit-appearance:none;appearance:none;height:8px;border-radius:999px;
+    background:var(--panel2);outline:none}
+  .vol input::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;
+    background:var(--fg);border:3px solid var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  .vol input::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--fg);
+    border:3px solid var(--accent);cursor:pointer}
+  .vol .val{font-family:var(--mono);font-weight:700;width:38px;text-align:right;color:var(--fg)}
+
+  /* ---- педаль газа ---- */
+  .pedal{position:relative;height:190px;border:1px solid var(--line);border-radius:22px;overflow:hidden;
+    background:repeating-linear-gradient(180deg,var(--panel) 0 22px,var(--bg2) 22px 44px);
+    touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer;box-shadow:var(--shadow) inset}
+  .pedal .fill{position:absolute;left:0;right:0;bottom:0;height:0;
+    background:linear-gradient(0deg,var(--accent) 0%,var(--accent2) 100%);transition:height .05s linear}
+  .pedal .lbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:4px;pointer-events:none;text-shadow:0 2px 10px rgba(0,0,0,.6)}
+  .pedal .lbl .big{font-family:var(--mono);font-weight:800;font-size:2.1rem;font-variant-numeric:tabular-nums}
+  .pedal .lbl .sm{font-size:.74rem;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+  .pedal.held{border-color:var(--accent)}
+  .pedal.held .lbl .sm{color:#fff}
+
+  .hint{text-align:center;font-size:.72rem;color:var(--muted);margin-top:-6px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>RevSound Стенд</h1>
-    <div class="row">
-      <span><span class="dot" id="dot"></span><span id="statusText">не подключено</span></span>
-      <button id="connectBtn" class="primary">BLE</button>
-      <input type="text" id="ip" placeholder="IP устройства" inputmode="decimal">
-      <button id="lanBtn">LAN</button>
-      <button id="simBtn">Демо</button>
-    </div>
+    <div class="brand">REV<b>SOUND</b></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="st">подключение…</span></div>
   </header>
 
-  <!-- БЕЙДЖИ СОСТОЯНИЯ: видно всё без динамика -->
-  <div class="badges">
-    <div class="badge off" id="bIgn"><div class="k">Зажигание</div><div class="v">ВЫКЛ</div></div>
-    <div class="badge off" id="bEng"><div class="k">Двигатель</div><div class="v">—</div></div>
-    <div class="badge off" id="bGear"><div class="k">Передача</div><div class="v">N</div></div>
-    <div class="badge off" id="bBus"><div class="k">Шина</div><div class="v">—</div></div>
-  </div>
-
-  <!-- ПРИБОР: большие цифры + полоса RPM -->
   <div class="gauge">
-    <div class="rpmBig" id="rpmBig">0</div>
-    <div class="rpmSub">об/мин · <span id="rpmZone">заглушен</span></div>
-    <div class="bar"><div class="redline"></div><div class="fill" id="rpmFill"></div>
-         <div class="lbl">0 — — — — — — — 5500 — — 6800</div></div>
-    <div class="rpmSub">Газ (реальный): <span class="monoV" id="vThr">0</span>% ·
-         Громкость: <span class="monoV" id="vGain">—</span>% ·
-         Пресет: <span class="monoV" id="vPreset">—</span> ·
-         Темп: <span class="monoV" id="vTemp">—</span>°</div>
-    <div class="bar thr"><div class="fill" id="thrFill"></div><div class="lbl">педаль</div></div>
-  </div>
-
-  <!-- СТЕНД: управление -->
-  <div class="panel">
-    <div class="row">
-      <button id="ignBtn" style="min-width:170px">🔑 Зажигание ВЫКЛ</button>
-      <span class="note">Шаг 1: зажигание → стартер → холостые. Шаг 2: педаль.</span>
-      <span style="margin-left:auto"></span>
-      <button id="gearDn">Передача −</button>
-      <button id="gearUp">Передача +</button>
+    <svg viewBox="0 0 220 180" aria-hidden="true">
+      <path id="track" fill="none" stroke="#222b38" stroke-width="16" stroke-linecap="round"/>
+      <path id="zone"  fill="none" stroke="#3a1510" stroke-width="16" stroke-linecap="round"/>
+      <path id="valArc" fill="none" stroke="var(--good)" stroke-width="16" stroke-linecap="round"/>
+      <line id="needle" stroke="var(--fg)" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="110" cy="120" r="8" fill="var(--fg)"/>
+    </svg>
+    <div class="gc">
+      <div class="rpm" id="rpm">0</div>
+      <div class="rpmU">ОБ/МИН</div>
     </div>
-    <div class="row" style="align-items:stretch">
-      <label class="fld">Педаль</label>
-      <div id="pedal"><div class="pfill" id="pfill"></div>
-        <div class="plbl" id="plbl">нажми и держи · отпустил = 0%</div></div>
-      <button id="thrFree">на пины</button>
-    </div>
-    <div class="note">Педаль — как настоящая: давишь глубже — больше газ, отпустил — сброс в 0.
-      Резкий отпуск на оборотах >2500 → прострелы; красная зона под газом → отсечка.</div>
-    <div class="row">
-      <label class="fld" for="idle">Холостые</label>
-      <input type="range" id="idle" min="600" max="1500" step="10" value="850">
-      <span class="monoV"><span id="idleVal">850</span></span>
-      <button id="idleSave">Записать</button>
-    </div>
-    <div class="row">
-      <label class="fld" for="rpmSet">RPM тест</label>
-      <input type="range" id="rpmSet" min="0" max="7000" step="50" value="0">
-      <span class="monoV"><span id="rpmSetVal">0</span></span>
-      <button id="rpmGo">Погнать 3с</button>
+    <div class="chips">
+      <div class="chip gear">передача <b id="gear">N</b></div>
+      <div class="chip">газ <b id="thr">0</b>%</div>
     </div>
   </div>
 
-  <!-- ЗВУК -->
-  <div class="panel">
-    <div class="row">
-      <label class="fld" for="vol">Громкость</label>
-      <input type="range" id="vol" min="0" max="100" value="80">
-      <span class="monoV"><span id="volVal">80</span>%</span>
-    </div>
-    <div class="row">
-      <label class="fld">Пресет</label>
-      <div class="presets" id="presets"></div>
-    </div>
-    <div class="row">
-      <label class="fld">Эффекты</label>
-      <button data-ev="0">Старт</button>
-      <button data-ev="2">Прострел</button>
-      <button data-ev="4">Отсечка</button>
-      <button data-ev="1">Стоп</button>
-    </div>
-    <div class="row">
-      <label class="fld">Лог SD</label>
-      <button id="recBtn">● Запись</button>
-      <button id="audBtn">🎙 Звук 5с → WAV</button>
-      <span class="note" id="audNote">захват с рендера — то, что реально играет</span>
-    </div>
-    <div class="note"><span id="errLine" class="err" hidden></span></div>
+  <div class="seg" id="modeSeg">
+    <button data-m="1" class="on">Газовка на месте</button>
+    <button data-m="0">Езда (АКПП)</button>
   </div>
+
+  <button class="ign" id="ign">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+    <span id="ignTxt">Запустить двигатель</span>
+  </button>
+
+  <div class="vol">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/>
+      <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
+    <input type="range" id="vol" min="0" max="100" value="80">
+    <span class="val" id="volVal">80</span>
+  </div>
+
+  <div class="pedal" id="pedal">
+    <div class="fill" id="pfill"></div>
+    <div class="lbl"><span class="big" id="plbl">0%</span><span class="sm">газ — держи</span></div>
+  </div>
+  <div class="hint">держи и веди вверх — сильнее газ · отпустил — сброс</div>
 </div>
 
 <script>
-const SVC  = "7e9a0001-5c2a-4b7e-9d10-a1b2c3d4e5f6";
-const CTRL = "7e9a0002-5c2a-4b7e-9d10-a1b2c3d4e5f6";
-const RPM  = "7e9a0003-5c2a-4b7e-9d10-a1b2c3d4e5f6";
-const RPM_MAX = 6800;
+const MAXRPM=7000, REDRPM=6000;
+let ws=null, ign=false, mode=1, thr=0, lastThr=-1, vol=80;
 
-let ctrlChar=null, device=null, ws=null, sim=false, simTimer=null, simRpm=800, simUp=true;
-
-function badge(id, state, txt){           // state: on|off|warn
-  const b=document.getElementById(id);
-  b.className="badge "+state; b.querySelector(".v").textContent=txt;
+// ---- геометрия прибора (270° дуга, центр 110,120, r=86) ----
+const CX=110, CY=120, R=86, A0=135, SWEEP=270;
+const d2r=d=>d*Math.PI/180;
+function pt(a){ return [CX+R*Math.cos(d2r(a)), CY+R*Math.sin(d2r(a))]; }
+function arc(aStart,aEnd){
+  const [x0,y0]=pt(aStart), [x1,y1]=pt(aEnd);
+  const large=(aEnd-aStart)>180?1:0;
+  return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
 }
-function setRpm(rpm){
-  const big=document.getElementById("rpmBig");
-  big.textContent=Math.round(rpm);
-  big.className="rpmBig"+(rpm>5000?" rev":rpm>300?" run":"");
-  document.getElementById("rpmFill").style.width=Math.min(100,rpm/RPM_MAX*100)+"%";
-  document.getElementById("rpmZone").textContent=
-    rpm<300?"заглушен":rpm<1200?"холостые":rpm<2500?"низкие":rpm<4500?"средние":"высокие";
+const ARCLEN=2*Math.PI*R*(SWEEP/360);
+document.getElementById("track").setAttribute("d",arc(A0,A0+SWEEP));
+document.getElementById("zone").setAttribute("d",arc(A0+SWEEP*(REDRPM/MAXRPM),A0+SWEEP));
+const valArc=document.getElementById("valArc"), needle=document.getElementById("needle");
+valArc.setAttribute("d",arc(A0,A0+SWEEP));
+valArc.style.strokeDasharray=ARCLEN;
+
+function setRpm(r){
+  r=Math.max(0,Math.min(MAXRPM,r));
+  const f=r/MAXRPM;
+  valArc.style.strokeDashoffset=ARCLEN*(1-f);
+  valArc.style.stroke = r>=REDRPM?"var(--accent)" : r>=REDRPM*0.75?"var(--warn)":"var(--good)";
+  const a=A0+SWEEP*f, [nx,ny]=pt(a);
+  needle.setAttribute("x1",CX); needle.setAttribute("y1",CY);
+  needle.setAttribute("x2",nx.toFixed(1)); needle.setAttribute("y2",ny.toFixed(1));
+  const el=document.getElementById("rpm");
+  el.textContent=Math.round(r);
+  el.className="rpm"+(r>=REDRPM?" red":r>300?" run":"");
+}
+setRpm(0);
+
+// ---- связь ----
+function status(cls,txt){ document.getElementById("dot").className="dot"+(cls?" "+cls:"");
+  document.getElementById("st").textContent=txt; }
+function send(bytes){ if(ws&&ws.readyState===1) ws.send(new Uint8Array(bytes)); }
+
+function telem(dv){
+  if(dv.byteLength<7) return;
+  setRpm(dv.getUint8(0)|(dv.getUint8(1)<<8));
+  const t=Math.round(dv.getUint8(2)/255*100);
+  document.getElementById("thr").textContent=t;
+  const s=dv.getUint8(7), running=!!(s&0x40), gear=s&0x0f;
+  document.getElementById("gear").textContent=gear?gear:"N";
+  if(!ign && running){ ign=true; paintIgn(); }   // стенд владеет = двигатель заведён
 }
 
-// телеметрия: [rpm u16][thr u8][st u8][preset u8][temp u8][err u8][flags u8][can u8][gain u8]
-function applyTelemetry(dv){
-  const rpm=dv.getUint8(0)|(dv.getUint8(1)<<8);
-  const thr=Math.round(dv.getUint8(2)/255*100);
-  const preset=dv.getUint8(4), temp=dv.getUint8(5), err=dv.getUint8(6);
-  setRpm(rpm);
-  document.getElementById("vThr").textContent=thr;
-  document.getElementById("thrFill").style.width=thr+"%";
-  document.getElementById("vTemp").textContent=temp?temp:"—";
-  document.getElementById("vPreset").textContent=preset;
-  markPreset(preset);
-  if(dv.byteLength>=8){
-    const s=dv.getUint8(7), stand=!!(s&0x80), running=!!(s&0x40), gear=s&0x0f;
-    badge("bEng", running?"on":"off", running?"РАБОТАЕТ":"заглушен");
-    badge("bGear", gear?"on":"off", gear?String(gear):"N");
-    const canAlive=dv.byteLength>=9?dv.getUint8(8):0;
-    if(stand) badge("bBus","on","СТЕНД");
-    else if(canAlive) badge("bBus","warn","CAN ЖИВ!");
-    else badge("bBus","off","CAN тихо");
-    if(dv.byteLength>=10) document.getElementById("vGain").textContent=
-      Math.round(dv.getUint8(9)/255*100);
-    // зажигание: отражаем что реально принял девайс (стенд владеет = зажигание вкл)
-    const ignEff = stand || ignOn;
-    badge("bIgn", ignEff?"on":"off", ignEff?"ВКЛ":"ВЫКЛ");
-  }
-  const el=document.getElementById("errLine");
-  if(err){ el.hidden=false; el.textContent="ошибка 0x"+err.toString(16); } else el.hidden=true;
-}
-
-async function send(bytes){
-  if(ws && ws.readyState===1){ ws.send(new Uint8Array(bytes)); return; }
-  if(ctrlChar){ try{ await ctrlChar.writeValueWithoutResponse(new Uint8Array(bytes)); }
-                catch(e){ showErr("не удалось отправить: "+e.message); } return; }
-}
-const vol=document.getElementById("vol"), volVal=document.getElementById("volVal");
-vol.addEventListener("input",()=>{ volVal.textContent=vol.value; send([0x01, Math.round(vol.value/100*255)]); });
-
-const presetsEl=document.getElementById("presets");
-for(let i=0;i<4;i++){ const b=document.createElement("button"); b.textContent="P"+i; b.dataset.p=i;
-  b.onclick=()=>{ send([0x02,i]); markPreset(i); }; presetsEl.appendChild(b); }
-function markPreset(i){ [...presetsEl.children].forEach(b=>b.classList.toggle("sel",+b.dataset.p===i)); }
-
-document.querySelectorAll("button[data-ev]").forEach(b=> b.onclick=()=>send([0x03, +b.dataset.ev]));
-
-// ---------- стенд ----------
-let ignOn=false, thrV=0;
-function sendStand(){ send([0x06, ignOn?1:0, Math.round(thrV/100*255)]); }
-const ignBtn=document.getElementById("ignBtn");
-ignBtn.onclick=()=>{ ignOn=!ignOn;
-  ignBtn.classList.toggle("sel",ignOn);
-  ignBtn.textContent=ignOn?"🔑 Зажигание ВКЛ":"🔑 Зажигание ВЫКЛ";
-  badge("bIgn", ignOn?"on":"off", ignOn?"ВКЛ":"ВЫКЛ");
-  sendStand(); };
-// педаль: позиция пальца/мыши в высоте = % газа; отпустил -> пружина в 0
-const pedal=document.getElementById("pedal"),
-      pfill=document.getElementById("pfill"), plbl=document.getElementById("plbl");
-function setThr(v){ thrV=Math.max(0,Math.min(100,Math.round(v)));
-  pfill.style.height=thrV+"%"; plbl.textContent=thrV+"%"; sendStand(); }
-function pedPct(e){ const r=pedal.getBoundingClientRect();
-  return (e.clientY-r.top)/r.height*100; }
-let pedHeld=false;
-pedal.addEventListener("pointerdown",e=>{ e.preventDefault(); pedHeld=true;
-  pedal.classList.add("held");
-  try{pedal.setPointerCapture(e.pointerId);}catch(_){}
-  setThr(pedPct(e)); });
-pedal.addEventListener("pointermove",e=>{ if(pedHeld) setThr(pedPct(e)); });
-function pedUp(){ if(pedHeld){ pedHeld=false; pedal.classList.remove("held"); setThr(0); } }
-pedal.addEventListener("pointerup",pedUp);
-pedal.addEventListener("pointercancel",pedUp);
-pedal.addEventListener("contextmenu",e=>e.preventDefault());
-document.getElementById("thrFree").onclick=()=>{ send([0x06, ignOn?1:0, 0, 3]); };
-document.getElementById("gearUp").onclick=()=>send([0x06, ignOn?1:0, Math.round(thrV/100*255), 1]);
-document.getElementById("gearDn").onclick=()=>send([0x06, ignOn?1:0, Math.round(thrV/100*255), 2]);
-const idleEl=document.getElementById("idle"), idleVal=document.getElementById("idleVal");
-idleEl.addEventListener("input",()=>idleVal.textContent=idleEl.value);
-document.getElementById("idleSave").onclick=()=>{ const v=+idleEl.value;
-  send([0x07, v&0xFF, (v>>8)&0xFF]); };
-// прямой тест RPM (команда 0x05 = rpm override 3с)
-const rpmSet=document.getElementById("rpmSet"), rpmSetVal=document.getElementById("rpmSetVal");
-rpmSet.addEventListener("input",()=>rpmSetVal.textContent=rpmSet.value);
-document.getElementById("rpmGo").onclick=()=>{ const v=+rpmSet.value;
-  send([0x05, v&0xFF, (v>>8)&0xFF]); };
-let recOn=false; const recBtn=document.getElementById("recBtn");
-recBtn.onclick=()=>{ recOn=!recOn; send([0x04, recOn?1:0]);
-  recBtn.classList.toggle("sel",recOn); recBtn.textContent=recOn?"■ Стоп":"● Запись"; };
-// захват звука: GET /rec армирует движок, через 5.5с скачиваем dump.wav
-document.getElementById("audBtn").onclick=async()=>{
-  const an=document.getElementById("audNote");
-  an.textContent="пишу 5с…"; try{ await fetch("/rec"); }catch(e){ an.textContent="ошибка"; return; }
-  setTimeout(()=>{ an.textContent="скачиваю dump.wav";
-    const a=document.createElement("a"); a.href="/dump.wav"; a.download="revsound_dump.wav";
-    document.body.appendChild(a); a.click(); a.remove();
-    an.textContent="готово — revsound_dump.wav"; },5600);
-};
-
-// ---------- статус ----------
-const dot=document.getElementById("dot"), statusText=document.getElementById("statusText");
-function setStatus(cls,txt){ dot.className="dot"+(cls?" "+cls:""); statusText.textContent=txt; }
-function showErr(m){ const el=document.getElementById("errLine"); el.hidden=false; el.textContent=m; }
-function dropTransports(){ stopSim(); if(ws){ws.close();ws=null;} ctrlChar=null; }
-
-function connectLAN(host){
-  if(!host){ showErr("введите IP устройства"); return; }
-  dropTransports();
-  setStatus("","подключение к "+host+"…");
+function connect(){
+  const host=location.host||"10.110.12.106";
+  status("","подключение…");
   try{
     ws=new WebSocket("ws://"+host+"/ctrl"); ws.binaryType="arraybuffer";
-    ws.onopen=()=>{ setStatus("on","LAN: "+host); send([0x01, Math.round(vol.value/100*255)]); };
-    ws.onmessage=e=>{ if(e.data.byteLength>=7) applyTelemetry(new DataView(e.data)); };
-    ws.onerror=()=>showErr("ошибка WebSocket (проверьте IP и сеть)");
-    ws.onclose=()=>{ if(!sim && (!ws||ws.readyState!==1)) setStatus("","соединение закрыто"); };
-  }catch(e){ showErr(e.message); }
+    ws.onopen=()=>{ status("on","на связи"); send([0x01,Math.round(vol/100*255)]); send([0x09,mode]); };
+    ws.onmessage=e=>telem(new DataView(e.data));
+    ws.onerror=()=>status("err","ошибка связи");
+    ws.onclose=()=>{ status("err","нет связи — переподключение"); setTimeout(connect,1500); };
+  }catch(e){ status("err",e.message); setTimeout(connect,2000); }
 }
-document.getElementById("lanBtn").onclick=()=>connectLAN(document.getElementById("ip").value.trim());
 
-document.getElementById("connectBtn").onclick=async()=>{
-  if(!navigator.bluetooth){ showErr("нет Web Bluetooth — используйте LAN"); return; }
-  try{
-    dropTransports();
-    device=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]},{namePrefix:"RevSound"}],optionalServices:[SVC]});
-    device.addEventListener("gattserverdisconnected",()=>setStatus("","связь потеряна"));
-    const srv=await device.gatt.connect();
-    const s=await srv.getPrimaryService(SVC);
-    ctrlChar=await s.getCharacteristic(CTRL);
-    const rpmChar=await s.getCharacteristic(RPM);
-    await rpmChar.startNotifications();
-    rpmChar.addEventListener("characteristicvaluechanged",e=>applyTelemetry(e.target.value));
-    setStatus("on","BLE: "+(device.name||"RevSound"));
-    send([0x01, Math.round(vol.value/100*255)]);
-  }catch(e){ showErr(e.message); }
-};
+// ---- зажигание ----
+function paintIgn(){ const b=document.getElementById("ign");
+  b.classList.toggle("on",ign);
+  document.getElementById("ignTxt").textContent=ign?"Заглушить":"Запустить двигатель"; }
+document.getElementById("ign").onclick=()=>{ ign=!ign; paintIgn();
+  send([0x06, ign?1:0, Math.round(thr/100*255)]); };
 
-// ---------- демо ----------
-function startSim(){
-  dropTransports(); sim=true; setStatus("sim","демо-режим");
-  simTimer=setInterval(()=>{
-    simRpm+= simUp? 180 : -150;
-    if(simRpm>6600)simUp=false; if(simRpm<850)simUp=true;
-    const buf=new DataView(new ArrayBuffer(10));
-    buf.setUint8(0,simRpm&0xff); buf.setUint8(1,(simRpm>>8)&0xff);
-    buf.setUint8(2,simUp?220:30); buf.setUint8(4,1); buf.setUint8(5,88);
-    buf.setUint8(7,0xC2); buf.setUint8(9,200);     // стенд+заведён+передача2
-    applyTelemetry(buf);
-  },120);
-}
-function stopSim(){ sim=false; if(simTimer){clearInterval(simTimer);simTimer=null;} }
-document.getElementById("simBtn").onclick=()=>{ if(sim){stopSim();setStatus("","не подключено");} else startSim(); };
+// ---- режимы ----
+document.querySelectorAll("#modeSeg button").forEach(b=>b.onclick=()=>{
+  mode=+b.dataset.m;
+  document.querySelectorAll("#modeSeg button").forEach(x=>x.classList.toggle("on",x===b));
+  send([0x09,mode]);
+});
 
-if(location.protocol==="http:"||location.protocol==="https:"){
-  document.getElementById("ip").value=location.host;
-  connectLAN(location.host);
-}else{ startSim(); }
+// ---- громкость ----
+const volEl=document.getElementById("vol");
+volEl.oninput=()=>{ vol=+volEl.value; document.getElementById("volVal").textContent=vol;
+  send([0x01,Math.round(vol/100*255)]); };
+
+// ---- педаль ----
+const pedal=document.getElementById("pedal"), pfill=document.getElementById("pfill"),
+      plbl=document.getElementById("plbl");
+function setThr(v){ thr=Math.max(0,Math.min(100,Math.round(v)));
+  pfill.style.height=thr+"%"; plbl.textContent=thr+"%";
+  if(thr!==lastThr){ lastThr=thr; send([0x06, ign?1:0, Math.round(thr/100*255)]); } }
+function pct(e){ const r=pedal.getBoundingClientRect();
+  return (1-(e.clientY-r.top)/r.height)*100; }   // верх = больше газа
+let held=false;
+pedal.addEventListener("pointerdown",e=>{ e.preventDefault(); held=true; pedal.classList.add("held");
+  try{pedal.setPointerCapture(e.pointerId);}catch(_){} setThr(pct(e)); });
+pedal.addEventListener("pointermove",e=>{ if(held) setThr(pct(e)); });
+function up(){ if(held){ held=false; pedal.classList.remove("held"); setThr(0); } }
+pedal.addEventListener("pointerup",up);
+pedal.addEventListener("pointercancel",up);
+pedal.addEventListener("contextmenu",e=>e.preventDefault());
+
+connect();
 </script>
 </body>
 </html>
-
-[executed on device: KOMPUTER (0089e01f-ace6-4dff-b186-c09b6a80372f)]

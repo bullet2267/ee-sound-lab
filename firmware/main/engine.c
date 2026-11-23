@@ -373,9 +373,21 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
         /* ПРАВКА 2026-11-22: при смене бэнда гранула «едет» между голосами —
          * несём её ФАЗУ, иначе голос читает НОВУЮ запись со СТАРОЙ фазы = щелчок
          * (цоки на нажатии газа, на спаде к нулю, микро на каждом шифте). */
+        /* ПРАВКА 2026-11-23: перенос фазы при ЛЮБОМ изменении пары.
+         * Соседний сдвиг на 1 бэнд (плавный свип) — несём абсолютную фазу.
+         * ПРЫЖОК через неск. бэндов (переключение передачи) — несём ДОЛЮ
+         * фазы: новая запись продолжается с той же относительной позиции, а
+         * не РЕСТАРТует с начала. Рестарт обоих голосов на шифте давал вторую
+         * атаку = «ту-дум» (двойной звук) на переключениях 2→3, 3→4. */
         { int og0 = e->v0.idx, og1 = e->v1.idx; float p0 = e->v0.phase, p1 = e->v1.phase;
-          if (gi == og1) e->v0.phase = p1;
-          if (gj == og0) e->v1.phase = p0; }
+          uint32_t l0 = b->grains[og0].length/2, l1 = b->grains[og1].length/2;
+          float f0 = l0 ? p0/(float)l0 : 0.f, f1 = l1 ? p1/(float)l1 : 0.f;
+          if      (gi == og0) {}                       /* тот же голос — фаза уже верна */
+          else if (gi == og1) e->v0.phase = p1;        /* соседний сдвиг — абсолютная */
+          else                e->v0.phase = f0 * (float)(b->grains[gi].length/2); /* прыжок — доля */
+          if      (gj == og1) {}
+          else if (gj == og0) e->v1.phase = p0;
+          else                e->v1.phase = f1 * (float)(b->grains[gj].length/2); }
         e->v0.idx = gi; e->v1.idx = gj;
         uint16_t r0 = b->grains[gi].baseRpm, r1 = b->grains[gj].baseRpm;
         float xf = (r1 > r0) ? (float)(rpm - r0) / (float)(r1 - r0) : 0.f;
@@ -390,8 +402,14 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
                  * e->masterGain * (1.f - idleMix + idleMix * e->idleGain);
         if (e->hasOff && rsb_grain_pair_l(b, rpm, 1, &ki, &kj) == 0) {
             { int ow0 = e->w0.idx, ow1 = e->w1.idx; float q0p = e->w0.phase, q1p = e->w1.phase;
-              if (ki == ow1) e->w0.phase = q1p;
-              if (kj == ow0) e->w1.phase = q0p; }   // перенос фазы off-слоя (без щелчка на бэндах)
+              uint32_t m0 = b->grains[ow0].length/2, m1 = b->grains[ow1].length/2;
+              float g0 = m0 ? q0p/(float)m0 : 0.f, g1 = m1 ? q1p/(float)m1 : 0.f;
+              if      (ki == ow0) {}                     // перенос фазы off-слоя:
+              else if (ki == ow1) e->w0.phase = q1p;     // соседний сдвиг — абсолютная
+              else                e->w0.phase = g0 * (float)(b->grains[ki].length/2); // прыжок — доля
+              if      (kj == ow1) {}
+              else if (kj == ow0) e->w1.phase = q0p;
+              else                e->w1.phase = g1 * (float)(b->grains[kj].length/2); }
             e->w0.idx = ki; e->w1.idx = kj;
             uint16_t q0 = b->grains[ki].baseRpm, q1 = b->grains[kj].baseRpm;
             float xo = (q1 > q0) ? (float)(rpm - q0) / (float)(q1 - q0) : 0.f;
@@ -408,6 +426,12 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
             rsb_rule_lookup_l(b, rpm, 1, &gQ, &lQ);
             offGain = ((gQ / 256.0f) + (lQ / 256.0f) * (1.f - e->throttle)) * e->masterGain;
         } else if (e->hasOff) { e->w0.idx = gi; e->w1.idx = gj; }
+        /* ПРАВКА 2026-11-23: один «цок» в момент нажатия газа — источник off-слоя
+         * мгновенно переключался с idle-подложки на лупы при переходе оборотов
+         * через ~1200, пока off ещё громкий. Держим подложку, пока off-слой не
+         * станет почти не слышен (layerMix>=0.9), тогда переключение беззвучно. */
+        if (e->offIdlePrev && !offIdle && e->layerMix < 0.9f && e->idleSeqN > 0) offIdle = 1;
+        e->offIdlePrev = (uint8_t)offIdle;
     }
     // multiMode: назначения голосов нет — ретриггер-модель работает внутри
     // сэмплового цикла: каждый голос играет гранулу целиком (без петли),
@@ -593,7 +617,7 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
                         const rsb_grain_t *ng = &b->grains[e->idleSeq[(e->idleCur + 1) % e->idleSeqN]];
                         is1 = ng->length ? (float)b->payload[ng->offset / 2] : is0;
                     }
-                    off = is0 + (is1 - is0) * ifr;
+                    off = (is0 + (is1 - is0) * ifr) * 1.7f;  /* ПРАВКА 2026-11-23: холостой был тихий — подъём ×1.7 */
                     e->idlePh += offRatio0;
                     if (ilen && e->idlePh >= (float)ilen) {
                         e->idlePh -= (float)ilen;

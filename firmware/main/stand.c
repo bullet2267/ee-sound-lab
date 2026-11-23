@@ -41,6 +41,7 @@ typedef struct {
 
 static engine_t *s_eng;
 static volatile uint8_t s_enabled;         // 0 = стенд выкл (авто-режим, пины игнорятся)
+static volatile uint8_t s_neutral;         // 1 = газовка на месте (нейтраль, без передач)
 static stand_t   s_st = {
     .idleRpm = 850.f, .shiftRpm = 5500.f, .redline = 6800.f, .revPerSec = 3800.f,
     .gears = 6, .rpm = 0.f, .thr = 0.f, .gear = 0,
@@ -69,6 +70,7 @@ static void cfg_load(void) {
 
 void stand_set_ign(engine_t *e, uint8_t on) { (void)e; s_enabled = 1; s_st.webIgn = on ? 1 : 0; }
 void stand_set_thr(engine_t *e, float t)    { (void)e; s_enabled = 1; s_st.webThr = t; }
+void stand_set_mode(engine_t *e, uint8_t neutral) { (void)e; s_enabled = 1; s_neutral = neutral ? 1 : 0; }
 void stand_set_idle(engine_t *e, float rpm) { (void)e;
     if (rpm >= 300 && rpm <= 2000) { s_st.idleRpm = rpm; cfg_save(); } }
 void stand_apply_pkg(engine_t *e, float idle, float redline) { (void)e;
@@ -118,6 +120,18 @@ static void stand_task(void *arg) {
         } else {
             if (s_st.rpm < 100.f && thr < 0.05f)          // "проворот" стартера
                 s_st.rpm = 400.f;
+            if (s_neutral) {
+                // газовка на месте: нейтраль, без передач — мотор крутится легко
+                // и быстро падает к холостым (блип). Передачи и авто-сдвиги не трогаем.
+                s_st.gear = 0;
+                float ntarget = s_st.idleRpm + thr * (s_st.redline - s_st.idleRpm);
+                float nrate = s_st.revPerSec * 1.6f;
+                if (s_st.rpm < ntarget) { s_st.rpm += nrate * dt; if (s_st.rpm > ntarget) s_st.rpm = ntarget; }
+                else                    { s_st.rpm -= nrate * 1.3f * dt; if (s_st.rpm < ntarget) s_st.rpm = ntarget; }
+                if (s_st.rpm < s_st.idleRpm * 0.85f) s_st.rpm = s_st.idleRpm * 0.85f;
+                s_st.thr = thr;
+                goto stand_out;                           // мимо логики передач
+            }
             if (thr > 0.05f && s_st.gear == 0) s_st.gear = 1;
             float target = s_st.idleRpm + thr * (s_st.redline - s_st.idleRpm);
             float rate = s_st.revPerSec / (s_st.gear > 0 ? s_st.gear : 1);
@@ -133,6 +147,7 @@ static void stand_task(void *arg) {
             if (s_st.gear > 1 && s_st.rpm < s_st.idleRpm * 1.7f && thr < 0.1f) s_st.gear--;
         }
         s_st.thr = thr;
+    stand_out:;
 
         // --- выход в движок: стенд только если включён И шина CAN молчит ---
         if (s_eng->canAliveMs > 0) s_eng->canAliveMs -= 20;      // живой CAN глушит стенд

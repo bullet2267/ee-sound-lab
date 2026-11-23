@@ -94,3 +94,30 @@ reverted to linear (helper left defined but unused).
 - Idle reconstruction: ordered-slice playthrough vs one pre-stitched loop vs
   equal-power ring — which is cleanest?
 - Loudness slightly hot vs reference (by-ear, deferred to real-speaker monitor).
+
+## 2026-11-23 — transition clicks, idle, and a focused web stand UI
+By-ear iteration on the faithful path, all verified on the board:
+
+- **Band-crossing "double attack" on gear shifts (2->3, 3->4).** On a gear
+  shift RPM jumps several bands at once (not a smooth one-band slide). The
+  earlier phase-carry only matched single-band slides, so on a jump both voices
+  reassigned to new loops and **restarted from the start** = a second attack
+  ("tu-dum"). 1->2 was fine because voices reached the top cleanly after a full
+  sweep. Fix (`engine.c`, on- and off-layer): carry the **phase fraction** on a
+  multi-band jump so the new loop continues from the same relative position
+  instead of restarting.
+- **Single click exactly at throttle onset.** At idle the off-layer plays the
+  idle bed; as revs cross ~1200 on tip-in the off-source switched hard from the
+  idle bed to the loop pair while the off-layer was still loud = one click. Fix
+  (`engine.c`): hold the idle bed through the tip-in fade until the off-layer
+  has faded under the on-layer (layerMix >= 0.9), so the source switch is
+  inaudible. State: `offIdlePrev` in `engine.h`.
+- **Idle level** raised x1.7 in the idle-bed path (`engine.c`): idle read quiet
+  relative to the loud pulls.
+- **Stand neutral mode** (`stand.c`/`stand.h`, WS cmd `0x09`): "rev in place" —
+  neutral, no gears, snappy rev and quick fall to idle (a blip). The existing
+  behavior (throttle -> RPM -> automatic gear shifts) is the "drive (AT)" mode.
+- **Web stand UI rewrite** (`web/index.html`): stripped to ignition, an SVG
+  tachometer (needle + arc, redline zone), a hold-and-drag gas pedal, a volume
+  slider, and the two-mode switch (rev-in-place / drive). Auto-connects over the
+  board's WebSocket `/ctrl`.
