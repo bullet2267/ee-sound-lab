@@ -42,6 +42,12 @@ typedef struct {
     uint8_t layerOn;           // целевой слой по газу
     uint8_t hasOff;            // в банке есть off-гранулы/правила
     uint32_t offDwell;         // мс при закрытом газе (гистерезис)
+    // ПРАВКА 2026-11-22: idle-срезы (класс1) играются ПОДРЯД как цельный тейк
+    // (~556мс), а не луп одного короткого куска (тот давал 7Гц throb + щелчки
+    // швов = «цыканье» на тихих местах).
+    int16_t idleSeq[8];        // индексы idle-гранул по порядку
+    uint8_t idleSeqN, idleCur; // сколько срезов; текущий
+    float   idlePh;            // фаза внутри текущего среза (сэмплы)
 
     // one-shot события (старт/прострел/лимитер), -1 = слот свободен.
     // Пул 4 голоса: серия прострелов играет НАЛОЖЕНИЕМ (как в оригинале —
@@ -117,6 +123,7 @@ void engine_init(engine_t *e, const rsb_bank_t *bank);
 void engine_set_rpm(engine_t *e, float rpm);
 void engine_set_throttle(engine_t *e, float t);   // задаёт throttleTarget
 void engine_set_acc_response(engine_t *e, float r); // 0..1 инерция газа
+void engine_set_reverb(float wet);                  // 0..1 реверб «кожуха» (0=выкл)
 void engine_trigger_event(engine_t *e, uint8_t type);
 void engine_fire(engine_t *e, int idx, float gain); // выстрелить ивент idx в пул 4 голосов
 void engine_stop_event(engine_t *e);                // глушит все one-shot голоса (StopSguSound)

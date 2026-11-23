@@ -56,3 +56,41 @@ the faithful ladder-crossfade path (`multiMode = 0`). Result on the board:
 load-layer tremolo 28% → 0.7%, clipping 13% → 0.14%, and the spectrogram shows
 real harmonics tracking RPM instead of a granular wash. Remaining: idle tremolo
 ~30% (class-1 idle loops beating).
+
+## 2026-11-22 (3) — faithful-path refinements: seams, idle, transitions
+With the faithful ladder-crossfade path now the only one used, the remaining
+work is micro-level artifacts, chased by ear on real recordings:
+
+- **Loop-seam "vinyl tick"** (`engine.c` `grain_at`/`grain_sample`, `bank.c`):
+  the loop seam now uses a **raised-cosine** crossfade (`w = 0.5 - 0.5·cos(π·wl)`),
+  a **minimum crossfade** of ~600 samples (~27 ms), and `bank.c` snaps each
+  working loop's start/end to **rising zero-crossings** so head and tail match
+  level and slope. Idle/short event clips are skipped by the snap. Result by
+  ear: the tick dropped to barely audible.
+- **Idle bed** (`engine.c` `offIdle` + `idleSeq`, `engine.h`): instead of
+  looping one short slice (7 Hz throb + seam ticks), collect the class-1 slices
+  in order and play them as **one continuous take**; at each slice boundary
+  interpolate into the **first sample of the next slice** (slices are contiguous
+  in the recording). By ear: throb gone on quiet idle, clean.
+- **Louder events** (`engine.c`): backfire/pop/cut `engine_fire` gains raised to
+  2.5 (pops were too weak to hear).
+- **Cabin reverb** (`engine.c`, WS cmd `0x08`): optional Schroeder reverb
+  (3 combs + allpass, 25–37 ms) modelling the enclosure resonance. Default OFF
+  (dry is cleaner); `0x08 <0..255>` sets wet.
+- **Band-crossing phase-carry** (latest, `engine.c`, on- and off-layer): on a
+  band change a grain "slides" from one voice to the other; previously the
+  receiving voice read the **new** recording from the **old** phase = a click at
+  throttle onset, at end-of-decay (rev→0), and a micro-click per gear shift. Now
+  the grain's phase is carried across the swap so playback position stays
+  continuous. Under active listening tests.
+
+A reverted dead end: 4-point Catmull-Rom interpolation (`cubic4`) was tried in
+place of linear to fight pitch-up aliasing, but by ear it sounded "dirtier";
+reverted to linear (helper left defined but unused).
+
+## Open (faithful path)
+- Confirm the band-crossing phase-carry removes the onset/decay/gear-shift
+  ticks without introducing a pitch glitch on the swap.
+- Idle reconstruction: ordered-slice playthrough vs one pre-stitched loop vs
+  equal-power ring — which is cleanest?
+- Loudness slightly hot vs reference (by-ear, deferred to real-speaker monitor).

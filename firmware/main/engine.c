@@ -13,6 +13,19 @@ static inline int16_t clip16(int32_t v) {
     return (int16_t)v;
 }
 
+/* ПРАВКА 2026-11-22: мягкое ограничение ТОЛЬКО у потолка. Колено 30000 —
+ * 92%+ сигнала (тело, транзиенты, прострелы) проходит как есть, без трима и
+ * без потери динамики. Округляются лишь редкие пики, что иначе давали бы
+ * жёсткий клип = «грязь/хруст как у пластинки». Это НЕ глобальный лимитер
+ * (его убрали — он плющил характер), а анти-клип только на самых верхушках. */
+static inline int16_t softclip(float v) {
+    const float K = 30000.f, M = 32767.f, R = M - K;   /* R=2767 */
+    float a = v < 0 ? -v : v;
+    if (a <= K) return (int16_t)v;
+    float c = K + R * tanhf((a - K) / R);               /* асимптота -> 32767 */
+    return (int16_t)(v < 0 ? -c : c);
+}
+
 // Быстрый PRNG (xorshift32) — без libc rand, безопасно в аудио-потоке.
 static inline uint32_t xrand(uint32_t *s) {
     uint32_t x = *s ? *s : 0x1234567u;
@@ -24,7 +37,17 @@ static inline float frand(uint32_t *s) { return (xrand(s) >> 8) / 16777216.0f; }
 /* EQ «коробки» и rpm-наклон удалены целиком (были отключены — eq_run
  * возвращал x): синтезированная АЧХ не подтверждена банком. PCM идёт как есть. */
 
-// Линейная интерполяция внутри гранулы (loop между loopStart..loopEnd), дробная фаза.
+/* ПРАВКА 2026-11-22: 4-точечная кубика Catmull-Rom вместо линейной интерполяции.
+ * Линейная при питч-шифте вверх даёт зеркальный алиасинг на верхах = «шуршание
+ * пластинки». Кубика его давит, звук чище. */
+static inline float cubic4(float ym1, float y0, float y1, float y2, float t) {
+    float a = -0.5f*ym1 + 1.5f*y0 - 1.5f*y1 + 0.5f*y2;
+    float b =       ym1 - 2.5f*y0 + 2.0f*y1 - 0.5f*y2;
+    float c = -0.5f*ym1          + 0.5f*y1;
+    return ((a*t + b)*t + c)*t + y0;
+}
+
+// Интерполяция внутри гранулы (loop между loopStart..loopEnd), дробная фаза.
 // сэмпл гранулы в позиции pos loop-домена (с кроссфейдом стыка петли);
 // pos >= 0 в «координатах фазы»: 0 соответствует сэмплу ls+xf
 static inline float grain_at(const rsb_bank_t *b, const rsb_grain_t *g, float pos) {
@@ -40,6 +63,7 @@ static inline float grain_at(const rsb_bank_t *b, const rsb_grain_t *g, float po
     // эффективный луп длиной L=loopLen-xf играет со сдвига xf —
     // переход F(L-1)≈s(ls+xf-1) → F(0)=s(ls+xf) непрерывен, «тика» нет
     uint32_t xf = g->xfade ? g->xfade : 154;           // RLS2 k9 (~700/300 сэмплов)
+    if (xf < 600) xf = 600;                            // ПРАВКА 2026-11-22: мин ~27мс — гладкий шов (меньше «тсык»)
     if (xf > loopLen / 2) xf = loopLen / 2;            // k9 > половины — берём пол-лупа
     uint32_t L = loopLen - xf;
     if (!L) { xf = 0; L = loopLen; }
@@ -50,7 +74,8 @@ static inline float grain_at(const rsb_bank_t *b, const rsb_grain_t *g, float po
     if (xf && i0 >= L - xf) {
         // зона фейда: tail = ls+xf+i0 ∈ [le-xf, le), head = ls+t ∈ [ls, ls+xf)
         uint32_t t = i0 - (L - xf);
-        float w = (float)(t + 1) / (float)(xf + 1);
+        float wl = (float)(t + 1) / (float)(xf + 1);
+        float w = 0.5f - 0.5f * cosf(3.14159265f * wl);  /* raised-cosine — гладкий шов, меньше «тсык» */
         uint32_t ti = ls + xf + i0, hi = ls + t;
         float ta = b->payload[base + ti];
         float tb = b->payload[base + ((ti + 1 < le) ? ti + 1 : ti)];
@@ -88,6 +113,7 @@ static inline float grain_sample(const rsb_bank_t *b, int gi, float *phase, floa
     uint32_t loopLen = le - ls;
     if (!loopLen || !len) { *phase = 0; return out; }
     uint32_t xf = g->xfade ? g->xfade : 154;
+    if (xf < 600) xf = 600;                            // = как в grain_at (шов consistent)
     if (xf > loopLen / 2) xf = loopLen / 2;
     uint32_t L = loopLen - xf;
     if (!L) L = loopLen;
@@ -112,6 +138,43 @@ static inline void dump_put(int16_t s) {
     if (s_dumpBuf && s_dumpPos < s_dumpLen) s_dumpBuf[s_dumpPos++] = s;
 }
 
+/* ПРАВКА 2026-11-22: лёгкий реверб «кожуха» (Schroeder: 3 гребёнки + allpass).
+ * Короткие задержки 25-37мс = боксовый резонанс круглого корпуса как у THOR.
+ * Включается командой 0x08 (wet 0..255), по умолчанию 0.22. Не зайдёт — 0. */
+static float *s_cb[3]; static int s_cbN[3], s_cbI[3]; static float s_cbF[3];
+static float *s_ap;    static int s_apN, s_apI;       static float s_apG = 0.5f;
+static float s_revWet = 0.0f;        // 0..1 (по умолчанию ВЫКЛ — dry чище; вкл командой 0x08)
+static int   s_revReady = 0;
+static void reverb_init(float sr) {
+    if (s_revReady) return;
+    int   cl[3] = { (int)(0.025f*sr), (int)(0.031f*sr), (int)(0.037f*sr) };
+    float cf[3] = { 0.55f, 0.52f, 0.50f };
+    for (int i = 0; i < 3; i++) {
+        s_cb[i] = calloc(cl[i] ? cl[i] : 1, sizeof(float));
+        s_cbN[i] = cl[i]; s_cbI[i] = 0; s_cbF[i] = cf[i];
+        if (!s_cb[i]) return;
+    }
+    s_apN = (int)(0.005f*sr); s_ap = calloc(s_apN ? s_apN : 1, sizeof(float)); s_apI = 0;
+    if (!s_ap) return;
+    s_revReady = 1;
+}
+static inline float reverb_run(float x) {
+    float acc = 0.f;
+    for (int i = 0; i < 3; i++) {
+        float y = s_cb[i][s_cbI[i]];
+        s_cb[i][s_cbI[i]] = x + y * s_cbF[i];
+        if (++s_cbI[i] >= s_cbN[i]) s_cbI[i] = 0;
+        acc += y;
+    }
+    acc *= 0.33f;
+    float z = s_ap[s_apI];
+    float o = z - s_apG * acc;
+    s_ap[s_apI] = acc + s_apG * o;
+    if (++s_apI >= s_apN) s_apI = 0;
+    return o;
+}
+void engine_set_reverb(float wet) { s_revWet = wet < 0 ? 0 : (wet > 1 ? 1 : wet); }
+
 void engine_init(engine_t *e, const rsb_bank_t *bank) {
     memset(e, 0, sizeof(*e));
     e->bank = bank;
@@ -134,6 +197,7 @@ void engine_init(engine_t *e, const rsb_bank_t *bank) {
     e->w0 = e->v0; e->w1 = e->v1;
     e->hasOff = (rsb_count_layer(bank, 1) > 0);
     e->layerOn = 0; e->layerMix = 0.f;   // холостой — off-слой
+    reverb_init((float)(bank && bank->sampleRate ? bank->sampleRate : 22050));
 }
 
 void engine_set_rpm(engine_t *e, float rpm)      { e->rpm = rpm; }
@@ -153,7 +217,7 @@ void engine_fire(engine_t *e, int idx, float gain) {
 
 void engine_trigger_event(engine_t *e, uint8_t type) {
     int i = rsb_find_event(e->bank, type);
-    if (i >= 0) engine_fire(e, i, 1.f);
+    if (i >= 0) engine_fire(e, i, type == 2 ? 2.5f : 1.f);  /* type2=отсечка/прострел — ГРОМЧЕ */
 }
 
 void engine_stop_event(engine_t *e) { for (int k = 0; k < 4; k++) e->evIdx[k] = -1; }
@@ -190,7 +254,7 @@ void engine_trigger_backfire(engine_t *e) {
 void engine_pop(engine_t *e) {
     if (!e->bank || e->popMute) return;
     int i = rsb_find_event_rand(e->bank, 2, xrand(&e->rng));
-    if (i >= 0) engine_fire(e, i, 1.f);
+    if (i >= 0) engine_fire(e, i, 2.5f);   /* ПРАВКА 2026-11-22: прострелы ГРОМЧЕ (слабо было) */
 }
 
 static volatile uint32_t s_renderCalls;
@@ -225,6 +289,11 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
                                      e->grSrc[k] = (int16_t)k; e->grPrev[k] = -1; e->grFade[k] = 0;
                                      e->grPrevPh[k] = 0.f; }
         e->cyc = 0.f; e->cycDm = 1.f; e->envRpm = e->rpm; e->rpmSm = e->rpm;
+        /* ПРАВКА 2026-11-22: собрать idle-срезы (класс1, бит2) по порядку —
+         * играем их ПОДРЯД как цельный тейк, а не луп одного куска. */
+        e->idleSeqN = 0; e->idleCur = 0; e->idlePh = 0.f;
+        for (int i = 0; i < b->grainCount && e->idleSeqN < 8; i++)
+            if (b->grains[i].flags & 4) e->idleSeq[e->idleSeqN++] = (int16_t)i;
     }
     if (!b || b->grainCount == 0 || b->sampleRate == 0 || e->rpm < 300.f) {
         // заглушен/нет банка: доигрываем активный one-shot (shutoff!), иначе
@@ -296,11 +365,17 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
      * rpm/thr-горка убрана: загоняла микс в лимитер и схлопывала динамику. */
 
     // --- старый режим 2-пар (банки без THOR-окон) ---
-    int gi = 0, gj = 0, ki = 0, kj = 0;
+    int gi = 0, gj = 0, ki = 0, kj = 0, offIdle = 0;
     float onRatio0 = 1.f, onRatio1 = 1.f, onA0 = 1.f, onA1 = 0.f, onGain = comGain;
     float offRatio0 = 1.f, offRatio1 = 1.f, offA0 = 1.f, offA1 = 0.f, offGain = 0.f;
     if (!e->multiMode) {
         if (rsb_grain_pair_l(b, rpm, 0, &gi, &gj) != 0) { gi = 0; gj = (b->grainCount > 1); }
+        /* ПРАВКА 2026-11-22: при смене бэнда гранула «едет» между голосами —
+         * несём её ФАЗУ, иначе голос читает НОВУЮ запись со СТАРОЙ фазы = щелчок
+         * (цоки на нажатии газа, на спаде к нулю, микро на каждом шифте). */
+        { int og0 = e->v0.idx, og1 = e->v1.idx; float p0 = e->v0.phase, p1 = e->v1.phase;
+          if (gi == og1) e->v0.phase = p1;
+          if (gj == og0) e->v1.phase = p0; }
         e->v0.idx = gi; e->v1.idx = gj;
         uint16_t r0 = b->grains[gi].baseRpm, r1 = b->grains[gj].baseRpm;
         float xf = (r1 > r0) ? (float)(rpm - r0) / (float)(r1 - r0) : 0.f;
@@ -314,6 +389,9 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
         onGain = ((gQ / 256.0f) + (lQ / 256.0f) * e->throttle)
                  * e->masterGain * (1.f - idleMix + idleMix * e->idleGain);
         if (e->hasOff && rsb_grain_pair_l(b, rpm, 1, &ki, &kj) == 0) {
+            { int ow0 = e->w0.idx, ow1 = e->w1.idx; float q0p = e->w0.phase, q1p = e->w1.phase;
+              if (ki == ow1) e->w0.phase = q1p;
+              if (kj == ow0) e->w1.phase = q0p; }   // перенос фазы off-слоя (без щелчка на бэндах)
             e->w0.idx = ki; e->w1.idx = kj;
             uint16_t q0 = b->grains[ki].baseRpm, q1 = b->grains[kj].baseRpm;
             float xo = (q1 > q0) ? (float)(rpm - q0) / (float)(q1 - q0) : 0.f;
@@ -322,6 +400,11 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
             offA1 = xo; offA0 = 1.f - xo;
             offRatio0 = (q0 > 0) ? e->rpm / (float)q0 : 1.f;
             offRatio1 = (q1 > 0) ? e->rpm / (float)q1 : 1.f;
+            /* ПРАВКА 2026-11-22: если off-пара — холостые срезы (бит2), играем
+             * их ПОДРЯД цельным тейком (idle-sequence в цикле ниже), а не
+             * кроссфейд/луп одного куска (то давало throb + «цыканье» швов). */
+            if ((b->grains[ki].flags & 4) && (b->grains[kj].flags & 4) && e->idleSeqN > 0)
+                offIdle = 1;
             rsb_rule_lookup_l(b, rpm, 1, &gQ, &lQ);
             offGain = ((gQ / 256.0f) + (lQ / 256.0f) * (1.f - e->throttle)) * e->masterGain;
         } else if (e->hasOff) { e->w0.idx = gi; e->w1.idx = gj; }
@@ -492,9 +575,36 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
             float s1 = grain_sample(b, e->v1.idx, &e->v1.phase, onRatio1);
             mix = (s0 * onA0 + s1 * onA1) * onGain * e->layerMix;
             if (e->hasOff && e->layerMix < 1.f) {
-                float t0 = grain_sample(b, e->w0.idx, &e->w0.phase, offRatio0);
-                float t1 = grain_sample(b, e->w1.idx, &e->w1.phase, offRatio1);
-                mix += (t0 * offA0 + t1 * offA1) * offGain * (1.f - e->layerMix);
+                float off;
+                if (offIdle) {
+                    /* idle-срезы ПОДРЯД цельным тейком. ПРАВКА 2026-11-22:
+                     * на ГРАНИЦЕ среза интерполируем в ПЕРВЫЙ сэмпл следующего
+                     * среза (срезы смежны в записи) — шов непрерывен, без «цока».
+                     * Раньше i1 заворачивался в начало ТОГО ЖЕ среза = щелчок. */
+                    const rsb_grain_t *ig = &b->grains[e->idleSeq[e->idleCur]];
+                    uint32_t ibase = ig->offset / 2, ilen = ig->length / 2;
+                    uint32_t i0 = (uint32_t)e->idlePh;
+                    if (ilen && i0 >= ilen) i0 = ilen - 1;
+                    float ifr = e->idlePh - (float)(uint32_t)e->idlePh;
+                    float is0 = ilen ? (float)b->payload[ibase + i0] : 0.f;
+                    float is1;
+                    if (i0 + 1 < ilen) is1 = b->payload[ibase + i0 + 1];
+                    else {
+                        const rsb_grain_t *ng = &b->grains[e->idleSeq[(e->idleCur + 1) % e->idleSeqN]];
+                        is1 = ng->length ? (float)b->payload[ng->offset / 2] : is0;
+                    }
+                    off = is0 + (is1 - is0) * ifr;
+                    e->idlePh += offRatio0;
+                    if (ilen && e->idlePh >= (float)ilen) {
+                        e->idlePh -= (float)ilen;
+                        e->idleCur = (uint8_t)((e->idleCur + 1) % e->idleSeqN);
+                    }
+                } else {
+                    float t0 = grain_sample(b, e->w0.idx, &e->w0.phase, offRatio0);
+                    float t1 = grain_sample(b, e->w1.idx, &e->w1.phase, offRatio1);
+                    off = t0 * offA0 + t1 * offA1;
+                }
+                mix += off * offGain * (1.f - e->layerMix);
             }
         }
 
@@ -503,7 +613,7 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
         if (e->bfLeft > 0) {
             if (e->bfTimer <= 0) {
                 int i = rsb_find_event_rand(b, 2, xrand(&e->rng)); // rng продвигается — вариант реально случаен
-                if (i >= 0) engine_fire(e, i, 1.f);
+                if (i >= 0) engine_fire(e, i, 2.5f);   /* ПРАВКА 2026-11-22: серия прострелов ГРОМЧЕ */
                 e->bfLeft--;
                 /* Геометрическая модель слотов (подтв. демо APK ~33мс решёткой):
                  * такт bfGapMs, выстрел прошёл — следующий слот через N тактов,
@@ -544,7 +654,9 @@ void engine_render(engine_t *e, int16_t *out, int nframes) {
             }
         }
 
-        int16_t s = clip16((int32_t)mix);
+        if (s_revWet > 0.001f && s_revReady)         /* реверб «кожуха» (crossfade dry/wet) */
+            mix = mix * (1.f - s_revWet) + reverb_run(mix) * s_revWet;
+        int16_t s = softclip(mix);   /* ПРАВКА 2026-11-22: анти-клип у потолка — чистим «грязь» */
         accOut += (float)s * s;
         out[2*n]   = s;    // L
         out[2*n+1] = s;    // R

@@ -404,8 +404,8 @@ void app_main(void) {
                 ovTmr -= 50;
                 if (ovTmr <= 0) {
                     if (bfBurst <= 0)
-                        bfBurst = z->cntMin + (int)(esp_random()
-                                  % (uint32_t)(z->cntMax - z->cntMin + 1));
+                        bfBurst = 2 + z->cntMin + (int)(esp_random()
+                                  % (uint32_t)(z->cntMax - z->cntMin + 1));  /* +2 гуще */
                     if (bfBurst > 0) {
                         engine_pop(&s_engine); bfBurst--;
                         /* ПРАВКА 2026-11-21 (паузы, подтв. демо APK):
@@ -417,7 +417,7 @@ void app_main(void) {
                             while ((int)(esp_random() % 100) >= z->gapP && ticks < 64)
                                 ticks++;
                             ovTmr = ticks * z->gapMs;
-                        } else ovTmr = 600 + (int)(esp_random() % 3401);
+                        } else ovTmr = 300 + (int)(esp_random() % 1201);  /* короче паузы — гуще перекатка */
                     }
                 }
             } else { bfBurst = 0; ovTmr = 0; }
@@ -426,7 +426,7 @@ void app_main(void) {
         if (rpm > 400.f && rpm < 1400.f && thr < 0.15f && armAgo) {
             idleTmr -= 50;
             if (idleTmr <= 0) { engine_pop(&s_engine);
-                                idleTmr = 4000 + (int)(esp_random() % 5000); }
+                                idleTmr = 2000 + (int)(esp_random() % 3000); }  /* чаще отстрелы ХХ */
         } else idleTmr = 1500;
         {   float rl = stand_redline();
             if (cutTmr) cutTmr -= 50;

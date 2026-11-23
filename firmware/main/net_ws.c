@@ -42,6 +42,7 @@ static void apply_cmd(uint8_t cmd, const uint8_t *p, int len) {
                    if (len>=3 && p[2]==3) stand_set_thr(s_eng, -1.f);         // газ назад на пины
                    break;
         case 0x07: if (len>=2) stand_set_idle(s_eng, (float)(p[0] | (p[1]<<8))); break; // холостые rpm
+        case 0x08: if (len>=1) engine_set_reverb(p[0] / 255.0f); break;                 // реверб «кожуха» 0..255
         case 0x0A: if (len>=1) g_thor_dbg = p[0] != 0;                            // thor:-логи 0/1
                    ESP_LOGI(TAG, "thor dbg=%d", g_thor_dbg); break;
         default: ESP_LOGW(TAG, "unknown cmd 0x%02x", cmd);

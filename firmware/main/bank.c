@@ -311,6 +311,25 @@ int thor_load_bank(const char *smp_path, const char *rls_path, rsb_bank_t *b) {
         pos += (len + 1) & ~1u;
         G[i].length = len;
     }
+    /* ПРАВКА 2026-11-22: снап границ петли на ВОСХОДЯЩИЙ zero-crossing.
+     * tail(loopEnd) и head(loopStart) оба проходят через 0 вверх => конец и
+     * начало совпадают по уровню и фазе, шов петли бесшовен (остаточный «тсык»
+     * на ходу исчезает физически). Только рабочие лупы (не idle/бит2, не
+     * короткие ивенты-подложки) и только если границы влезают в uint16. */
+    {
+        int16_t *P = (int16_t *)dec;
+        for (int i = 0; i < gc; i++) {
+            uint32_t b0 = G[i].offset / 2, Lg = G[i].length / 2;
+            if ((G[i].flags & 4) || Lg < 2400 || Lg > 0xFFFF) continue;  // idle/короткие пропускаем
+            uint32_t le2 = Lg;
+            for (uint32_t k = Lg - 1; k > Lg - 1000 && k > 1; k--)
+                if (P[b0 + k - 1] <= 0 && P[b0 + k] > 0) { le2 = k; break; }   // восходящий ZC у конца
+            uint32_t ls2 = 0;
+            for (uint32_t k = 1; k < 1000 && k < Lg; k++)
+                if (P[b0 + k - 1] <= 0 && P[b0 + k] > 0) { ls2 = k; break; }   // восходящий ZC у начала
+            if (le2 > ls2 + 2400) { G[i].loopStart = (uint16_t)ls2; G[i].loopEnd = (uint16_t)le2; }
+        }
+    }
     for (int i = 0; i < ecount; i++) {               // ивенты — следом за гранулами
         uint32_t off = EV[i].offset, len = EV[i].length;
         EV[i].offset = pos;
